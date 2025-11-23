@@ -4,6 +4,7 @@ import _ "embed"
 
 type Config struct {
 	PrintProgress        bool     `yaml:"print-progress"`
+	ManualTriggerOnly    bool     `yaml:"manual-trigger-only"`
 	Concurrent           int      `yaml:"concurrent"`
 	CheckInterval        int      `yaml:"check-interval"`
 	CronExpression       string   `yaml:"cron-expression"`
@@ -73,6 +74,7 @@ var GlobalConfig = &Config{
 	DownloadMB:         20,
 	AliveTestUrl:       "http://gstatic.com/generate_204",
 	SubUrlsGetUA:       "clash.meta (https://github.com/beck-8/subs-check)",
+	ManualTriggerOnly:  false,
 }
 
 //go:embed config.example.yaml

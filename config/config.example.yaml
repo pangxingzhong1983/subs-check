@@ -1,6 +1,9 @@
 # 是否显示进度
 print-progress: true
 
+# 是否仅手动触发检测(不启用定时器/首次启动运行)
+manual-trigger-only: false
+
 # 并发线程数
 concurrent: 20
 # 检查间隔(分钟)

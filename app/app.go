@@ -64,10 +64,16 @@ func (app *App) Initialize() error {
 		return fmt.Errorf("初始化配置文件监听失败: %w", err)
 	}
 
-	// 从配置文件中读取代理，设置代理
+	// 从配置文件中读取代理，设置/清除代理
+	proxyVars := []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}
 	if config.GlobalConfig.Proxy != "" {
-		os.Setenv("HTTP_PROXY", config.GlobalConfig.Proxy)
-		os.Setenv("HTTPS_PROXY", config.GlobalConfig.Proxy)
+		for _, key := range proxyVars {
+			os.Setenv(key, config.GlobalConfig.Proxy)
+		}
+	} else {
+		for _, key := range proxyVars {
+			os.Unsetenv(key)
+		}
 	}
 
 	app.interval = func() int {
@@ -115,8 +121,9 @@ func (app *App) Run() {
 	// 设置初始定时器模式
 	app.setTimer()
 
-	// 仅在cron表达式为空时，首次启动立即执行检测
-	if config.GlobalConfig.CronExpression != "" {
+	if config.GlobalConfig.ManualTriggerOnly {
+		slog.Info("Manual trigger mode enabled, waiting for manual start")
+	} else if config.GlobalConfig.CronExpression != "" {
 		slog.Warn("使用cron表达式，首次启动不立即执行检测")
 	} else {
 		app.triggerCheck()
@@ -130,6 +137,20 @@ func (app *App) Run() {
 
 // setTimer 根据配置设置定时器
 func (app *App) setTimer() {
+	if config.GlobalConfig.ManualTriggerOnly {
+		if app.ticker != nil {
+			close(app.done)
+			app.done = make(chan struct{})
+			app.ticker.Stop()
+			app.ticker = nil
+		}
+		if app.cron != nil {
+			app.cron.Stop()
+			app.cron = nil
+		}
+		slog.Info("Manual trigger only mode, timers disabled")
+		return
+	}
 	// 停止现有定时器
 	if app.ticker != nil {
 		// 应该先发送停止信号，防止被=nil后panic
