@@ -1,15 +1,4 @@
-<h1 align="center">🚀 订阅检测转换工具</h1>
-
-<p align="center">
-	<a href="https://github.com/beck-8/subs-check/releases"><img src="https://img.shields.io/github/v/release/beck-8/subs-check?style=flat-square&include_prereleases&label=version" /></a>
-	<a href="https://github.com/beck-8/subs-check/releases"><img src="https://img.shields.io/github/downloads/beck-8/subs-check/total.svg?style=flat-square" /></a>
-  <a href="https://hub.docker.com/r/beck8/subs-check/tags"><img src="https://img.shields.io/docker/pulls/beck8/subs-check" /></a>
-	<a href="https://github.com/beck-8/subs-check/issues"><img src="https://img.shields.io/github/issues-raw/beck-8/subs-check.svg?style=flat-square&label=issues" /></a>
-	<a href="https://github.com/beck-8/subs-check/graphs/contributors"><img src="https://img.shields.io/github/contributors/beck-8/subs-check?style=flat-square" /></a>
-	<a href="https://github.com/beck-8/subs-check/blob/master/LICENSE"><img src="https://img.shields.io/github/license/beck-8/subs-check?style=flat-square" /></a>
-</p>
-
----
+# 🚀 订阅检测转换工具
 
 > **✨ 修复逻辑、简化操作、增加功能、节省内存、一键启动无需配置**
 
@@ -42,6 +31,19 @@
 
 ## 🛠️ 部署与使用 
 > 首次运行会在当前目录生成默认配置文件。
+
+### 📝 查看运行日志
+
+无论是本地运行还是 Docker 部署，subs-check 都会把日志写入标准输出以及程序内的临时文件 `TempLog()`（默认是 `/tmp/subs-check.log`）。
+
+- **Docker 环境**：
+  - `docker logs <容器名>` 可以实时查看最新日志，例如 `docker logs -f zhuque-subscheck`。
+  - 进入容器后也可以直接读取文件：`docker exec -it zhuque-subscheck tail -n 200 /tmp/subs-check.log`。
+  - Web 控制台的「日志」面板也是从该文件读取内容，默认返回最近 100 条。
+  - 本机已经常驻三个 subs-check 容器：`fufei-subscheck`（9199/9299）、`zhuque-subscheck`（8199/8299）和 `mianfei-subscheck`（7199/7299）；排查时直接针对这些容器查看日志或进入 shell 即可。
+- **宿主机/裸跑环境**：直接 `tail -f /tmp/subs-check.log` 即可。如果需要保留更久，可在启动前设置 `LOG_LEVEL` 或将 `/tmp` 挂载到指定目录。
+
+出现崩溃或 panic 时，上述日志会记录完整堆栈，是排查问题的第一手信息。
 
 ### 🪜 代理设置（可选）
 <details>
