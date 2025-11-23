@@ -1,17 +1,43 @@
 package proxies
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"log/slog"
 
 	"github.com/beck-8/subs-check/config"
 	"github.com/metacubex/mihomo/common/convert"
 )
+
+func geoTimeout() time.Duration {
+	t := time.Duration(config.GlobalConfig.Timeout) * time.Millisecond
+	if t <= 0 {
+		t = 5 * time.Second
+	}
+	if t > 15*time.Second {
+		t = 15 * time.Second
+	}
+	return t
+}
+
+func newGeoRequest(method, url, ua string) (*http.Request, context.CancelFunc, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), geoTimeout())
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	return req, cancel, nil
+}
 
 func GetProxyCountry(httpClient *http.Client) (loc string, ip string) {
 	for i := 0; i < config.GlobalConfig.SubUrlsReTry; i++ {
@@ -47,13 +73,14 @@ func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {
 	}
 
 	url := "https://functions-geolocation.edgeone.app/geo"
-	req, err := http.NewRequest("GET", url, nil)
+	req, cancel, err := newGeoRequest(http.MethodGet, url, convert.RandUserAgent())
 	if err != nil {
 		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
 		return
 	}
-	req.Header.Set("User-Agent", convert.RandUserAgent())
-	resp, err := httpClient.Get(url)
+	defer cancel()
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("edgeone获取节点位置失败: %s", err))
 		return
@@ -83,13 +110,14 @@ func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {
 
 func GetCFProxy(httpClient *http.Client) (loc string, ip string) {
 	url := "https://www.cloudflare.com/cdn-cgi/trace"
-	req, err := http.NewRequest("GET", url, nil)
+	req, cancel, err := newGeoRequest(http.MethodGet, url, convert.RandUserAgent())
 	if err != nil {
 		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
 		return
 	}
-	req.Header.Set("User-Agent", convert.RandUserAgent())
-	resp, err := httpClient.Get(url)
+	defer cancel()
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("cf获取节点位置失败: %s", err))
 		return
@@ -126,12 +154,13 @@ func GetIPLark(httpClient *http.Client) (loc string, ip string) {
 	}
 
 	url := string([]byte{104, 116, 116, 112, 115, 58, 47, 47, 102, 51, 98, 99, 97, 48, 101, 50, 56, 101, 54, 98, 46, 97, 97, 112, 113, 46, 110, 101, 116, 47, 105, 112, 97, 112, 105, 47, 105, 112, 99, 97, 116})
-	req, err := http.NewRequest("GET", url, nil)
+	req, cancel, err := newGeoRequest(http.MethodGet, url, "curl/8.7.1")
 	if err != nil {
 		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
 		return
 	}
-	req.Header.Set("User-Agent", "curl/8.7.1")
+	defer cancel()
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("iplark获取节点位置失败: %s", err))
@@ -167,12 +196,13 @@ func GetMe(httpClient *http.Client) (loc string, ip string) {
 	}
 
 	url := "https://ip.122911.xyz/api/ipinfo"
-	req, err := http.NewRequest("GET", url, nil)
+	req, cancel, err := newGeoRequest(http.MethodGet, url, "subs-check (https://github.com/beck-8/subs-check)")
 	if err != nil {
 		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
 		return
 	}
-	req.Header.Set("User-Agent", "subs-check (https://github.com/beck-8/subs-check)")
+	defer cancel()
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("me获取节点位置失败: %s", err))

@@ -504,7 +504,16 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 	}
 
 	var bytesRead uint64
+	overallTimeout := time.Duration(config.GlobalConfig.Timeout) * time.Millisecond
+	if dl := time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second; dl > overallTimeout {
+		overallTimeout = dl
+	}
+	if overallTimeout < 5*time.Second {
+		overallTimeout = 5 * time.Second
+	}
 	baseTransport := &http.Transport{
+		ResponseHeaderTimeout: overallTimeout,
+		TLSHandshakeTimeout:   10 * time.Second,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -532,7 +541,7 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 
 	return &ProxyClient{
 		Client: &http.Client{
-			Timeout:   time.Duration(config.GlobalConfig.Timeout) * time.Millisecond,
+			Timeout:   overallTimeout,
 			Transport: baseTransport,
 		},
 		proxy:     proxy,
