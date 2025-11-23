@@ -8,7 +8,7 @@ IMAGE_NAME="subs-check:local"
 PROJECTS=(mianfei-subscheck zhuque-subscheck fufei-subscheck test-subcheck)
 
 echo "=== 使用本地仓构建 $IMAGE_NAME ==="
-(cd "$REPO" && docker build -t "$IMAGE_NAME" .)
+(cd "$REPO" && docker build --pull --no-cache -t "$IMAGE_NAME" .)
 
 for project in "${PROJECTS[@]}"; do
   echo "=== 重启 $project ==="
