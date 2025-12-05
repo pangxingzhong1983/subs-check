@@ -140,16 +140,20 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 	// 收集结果 - 添加一个 WaitGroup 来等待结果收集完成
 	var collectWg sync.WaitGroup
 	collectWg.Add(1)
+	slog.Info("结果收集开始", "expected", len(proxies))
 	go func() {
 		pc.collectResults()
 		collectWg.Done()
 	}()
 
+	slog.Info("等待所有检测线程完成")
 	wg.Wait()
+	slog.Info("所有检测线程完成，准备关闭结果通道")
 	close(pc.resultChan)
 
 	// 等待结果收集完成
 	collectWg.Wait()
+	slog.Info("结果收集完成", "totalResults", len(pc.results))
 	// 等待进度条显示完成
 	time.Sleep(100 * time.Millisecond)
 
@@ -173,7 +177,10 @@ func (pc *ProxyChecker) run(proxies []map[string]any) ([]Result, error) {
 func (pc *ProxyChecker) worker(wg *sync.WaitGroup) {
 	defer wg.Done()
 	for proxy := range pc.tasks {
-		if result := pc.checkProxy(proxy); result != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), pc.proxyTimeout())
+		result := pc.checkProxy(ctx, proxy)
+		cancel()
+		if result != nil {
 			pc.resultChan <- *result
 		}
 		pc.incrementProgress()
@@ -181,7 +188,14 @@ func (pc *ProxyChecker) worker(wg *sync.WaitGroup) {
 }
 
 // checkProxy 检测单个代理
-func (pc *ProxyChecker) checkProxy(proxy map[string]any) *Result {
+func (pc *ProxyChecker) checkProxy(ctx context.Context, proxy map[string]any) *Result {
+	select {
+	case <-ctx.Done():
+		slog.Warn("节点检测超时/取消，跳过", "name", proxy["name"])
+		return nil
+	default:
+	}
+
 	res := &Result{
 		Proxy: proxy,
 	}
@@ -191,21 +205,33 @@ func (pc *ProxyChecker) checkProxy(proxy map[string]any) *Result {
 		return res
 	}
 
-	httpClient := CreateClient(proxy)
+	httpClient := CreateClient(ctx, proxy)
 	if httpClient == nil {
 		slog.Debug(fmt.Sprintf("创建代理Client失败: %v", proxy["name"]))
 		return nil
 	}
 	defer httpClient.Close()
 
-	google, err := platform.CheckAlive(httpClient.Client)
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+
+	google, err := platform.CheckAlive(ctx, httpClient.Client)
 	if err != nil || !google {
 		return nil
 	}
 
 	var speed int
 	if config.GlobalConfig.SpeedTestUrl != "" {
-		speed, _, err = platform.CheckSpeed(httpClient.Client, Bucket, httpClient.BytesRead)
+		select {
+		case <-ctx.Done():
+			slog.Warn("节点检测超时/取消，测速前退出", "name", proxy["name"])
+			return nil
+		default:
+		}
+		speed, _, err = platform.CheckSpeed(ctx, httpClient.Client, Bucket, httpClient.BytesRead)
 		if err != nil || speed < config.GlobalConfig.MinSpeed {
 			return nil
 		}
@@ -387,6 +413,19 @@ func (pc *ProxyChecker) incrementAvailable() {
 	Available.Add(1)
 }
 
+// proxyTimeout 确保单个节点检测有硬性超时时间
+func (pc *ProxyChecker) proxyTimeout() time.Duration {
+	timeout := time.Duration(config.GlobalConfig.Timeout) * time.Millisecond
+	download := time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second
+	if download > timeout {
+		timeout = download
+	}
+	if timeout < 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	return timeout
+}
+
 // distributeProxies 分发代理任务
 func (pc *ProxyChecker) distributeProxies(proxies []map[string]any) {
 	for _, proxy := range proxies {
@@ -409,9 +448,12 @@ func (pc *ProxyChecker) distributeProxies(proxies []map[string]any) {
 
 // collectResults 收集检测结果
 func (pc *ProxyChecker) collectResults() {
+	collected := 0
 	for result := range pc.resultChan {
 		pc.results = append(pc.results, result)
+		collected++
 	}
+	slog.Info("结果通道关闭", "collected", collected)
 }
 
 // checkSubscriptionSuccessRate 检查订阅成功率并发出警告
@@ -496,7 +538,7 @@ type ProxyClient struct {
 	BytesRead *uint64
 }
 
-func CreateClient(mapping map[string]any) *ProxyClient {
+func CreateClient(ctx context.Context, mapping map[string]any) *ProxyClient {
 	proxy, err := adapter.ParseProxy(mapping)
 	if err != nil {
 		slog.Debug(fmt.Sprintf("底层mihomo创建代理Client失败: %v", err))
@@ -514,7 +556,7 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 	baseTransport := &http.Transport{
 		ResponseHeaderTimeout: overallTimeout,
 		TLSHandshakeTimeout:   10 * time.Second,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		DialContext: func(dctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
@@ -523,6 +565,7 @@ func CreateClient(mapping map[string]any) *ProxyClient {
 			if port, err := strconv.ParseUint(port, 10, 16); err == nil {
 				u16Port = uint16(port)
 			}
+			// 使用传入的 ctx 以便超时/取消能传递到底层拨号
 			conn, err := proxy.DialContext(ctx, &constant.Metadata{
 				Host:    host,
 				DstPort: u16Port,

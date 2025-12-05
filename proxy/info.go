@@ -18,10 +18,10 @@ import (
 func geoTimeout() time.Duration {
 	t := time.Duration(config.GlobalConfig.Timeout) * time.Millisecond
 	if t <= 0 {
-		t = 5 * time.Second
+		t = 3 * time.Second
 	}
-	if t > 15*time.Second {
-		t = 15 * time.Second
+	if t > 8*time.Second {
+		t = 8 * time.Second
 	}
 	return t
 }
@@ -41,25 +41,108 @@ func newGeoRequest(method, url, ua string) (*http.Request, context.CancelFunc, e
 
 func GetProxyCountry(httpClient *http.Client) (loc string, ip string) {
 	for i := 0; i < config.GlobalConfig.SubUrlsReTry; i++ {
-		loc, ip = GetMe(httpClient)
+		// 优先使用更稳定的 ipapi.co
+		loc, ip = GetIPAPI(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
-		loc, ip = GetIPLark(httpClient)
-		if loc != "" && ip != "" {
-			return
-		}
-		loc, ip = GetCFProxy(httpClient)
-		if loc != "" && ip != "" {
-			return
-		}
-		// 不准
-		loc, ip = GetEdgeOneProxy(httpClient)
+		// 次选 ip-api.com，速率宽松
+		loc, ip = GetIPAPICom(httpClient)
 		if loc != "" && ip != "" {
 			return
 		}
 	}
 	return
+}
+
+func GetIPAPICom(httpClient *http.Client) (loc string, ip string) {
+	type GeoIPData struct {
+		Query       string `json:"query"`
+		CountryCode string `json:"countryCode"`
+		Status      string `json:"status"`
+		Message     string `json:"message"`
+	}
+
+	req, cancel, err := newGeoRequest(http.MethodGet, "http://ip-api.com/json/?fields=status,message,countryCode,query", convert.RandUserAgent())
+	if err != nil {
+		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
+		return
+	}
+	defer cancel()
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ip-api获取节点位置失败: %s", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug(fmt.Sprintf("ip-api返回非200状态码: %v", resp.StatusCode))
+		return
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ip-api读取节点位置失败: %s", err))
+		return
+	}
+
+	var geo GeoIPData
+	err = json.Unmarshal(body, &geo)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("解析ip-api JSON 失败: %v", err))
+		return
+	}
+
+	if geo.Status != "success" {
+		slog.Debug(fmt.Sprintf("ip-api返回状态非success: %s", geo.Message))
+		return
+	}
+
+	return geo.CountryCode, geo.Query
+}
+
+func GetIPAPI(httpClient *http.Client) (loc string, ip string) {
+	type GeoIPData struct {
+		IP      string `json:"ip"`
+		Country string `json:"country_code"`
+	}
+
+	// ipapi.co 免费接口，限制较宽松
+	req, cancel, err := newGeoRequest(http.MethodGet, "https://ipapi.co/json", convert.RandUserAgent())
+	if err != nil {
+		slog.Debug(fmt.Sprintf("创建请求失败: %s", err))
+		return
+	}
+	defer cancel()
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ipapi获取节点位置失败: %s", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Debug(fmt.Sprintf("ipapi返回非200状态码: %v", resp.StatusCode))
+		return
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("ipapi读取节点位置失败: %s", err))
+		return
+	}
+
+	var geo GeoIPData
+	err = json.Unmarshal(body, &geo)
+	if err != nil {
+		slog.Debug(fmt.Sprintf("解析ipapi JSON 失败: %v", err))
+		return
+	}
+
+	return geo.Country, geo.IP
 }
 
 func GetEdgeOneProxy(httpClient *http.Client) (loc string, ip string) {

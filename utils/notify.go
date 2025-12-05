@@ -13,6 +13,10 @@ import (
 	"github.com/beck-8/subs-check/config"
 )
 
+var notifyHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
+
 // NotifyRequest 定义发送通知的请求结构
 type NotifyRequest struct {
 	URLs  string `json:"urls"`  // 通知目标的 URL（如 mailto://、discord://）
@@ -29,7 +33,7 @@ func Notify(request NotifyRequest) error {
 	}
 
 	// 发送请求
-	resp, err := http.Post(config.GlobalConfig.AppriseApiServer, "application/json", bytes.NewBuffer(body))
+	resp, err := notifyHTTPClient.Post(config.GlobalConfig.AppriseApiServer, "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("发送请求失败: %w", err)
 	}

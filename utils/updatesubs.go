@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"log/slog"
 
@@ -25,6 +26,10 @@ type providersResponse struct {
 	Providers map[string]struct {
 		VehicleType string `json:"vehicleType"`
 	} `json:"providers"`
+}
+
+var mihomoHTTPClient = &http.Client{
+	Timeout: 15 * time.Second,
 }
 
 // makeRequest 处理通用的 HTTP 请求逻辑
@@ -63,7 +68,7 @@ func UpdateSubs() {
 		return
 	}
 
-	version, err := getVersion(http.DefaultClient)
+	version, err := getVersion(mihomoHTTPClient)
 	if err != nil {
 		slog.Error(fmt.Sprintf("获取版本失败: %v", err))
 		return
@@ -71,13 +76,13 @@ func UpdateSubs() {
 
 	slog.Info(fmt.Sprintf("当前Mihomo版本: %s", version))
 
-	names, err := getNeedUpdateNames(http.DefaultClient)
+	names, err := getNeedUpdateNames(mihomoHTTPClient)
 	if err != nil {
 		slog.Error(fmt.Sprintf("获取需要更新的订阅失败: %v", err))
 		return
 	}
 
-	if err := updateSubs(http.DefaultClient, names); err != nil {
+	if err := updateSubs(mihomoHTTPClient, names); err != nil {
 		slog.Error(fmt.Sprintf("更新订阅失败: %v", err))
 		return
 	}

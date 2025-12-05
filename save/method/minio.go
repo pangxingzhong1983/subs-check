@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/beck-8/subs-check/config"
 	"github.com/minio/minio-go/v7"
@@ -31,7 +32,8 @@ func ValiS3Config() error {
 // UploadToS3 uploads data to a MinIO bucket.
 // The 'filename' parameter will be used as the object name in the bucket.
 func UploadToS3(data []byte, filename string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	endpoint := config.GlobalConfig.S3Endpoint
 	accessKeyID := config.GlobalConfig.S3AccessID
 	secretAccessKey := config.GlobalConfig.S3SecretKey

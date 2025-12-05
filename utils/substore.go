@@ -64,6 +64,10 @@ var mihomoOverwriteUrl string
 // 基础URL配置
 var BaseURL string
 
+var internalHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
+
 func UpdateSubStore(yamlData []byte) {
 	// 调试的时候等一等node启动
 	if os.Getenv("SUB_CHECK_SKIP") != "" && config.GlobalConfig.SubStorePort != "" {
@@ -111,24 +115,58 @@ func UpdateSubStore(yamlData []byte) {
 	slog.Info("substore更新完成")
 }
 func checkSub() error {
-	resp, err := http.Get(fmt.Sprintf("%s/api/sub/%s", BaseURL, SubName))
-	if err != nil {
-		return err
+	url := fmt.Sprintf("%s/api/sub/%s", BaseURL, SubName)
+	for i := 0; i < 2; i++ {
+		resp, err := internalHTTPClient.Get(url)
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			if i == 1 {
+				return fmt.Errorf("获取sub配置文件失败，状态码:%d", resp.StatusCode)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if !json.Valid(body) {
+			if i == 1 {
+				return fmt.Errorf("获取sub配置文件失败，返回内容不是JSON")
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		var fileResult fileResult
+		err = json.Unmarshal(body, &fileResult)
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if fileResult.Status != "success" {
+			if i == 1 {
+				return fmt.Errorf("获取sub配置文件失败")
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	var fileResult fileResult
-	err = json.Unmarshal(body, &fileResult)
-	if err != nil {
-		return err
-	}
-	if fileResult.Status != "success" {
-		return fmt.Errorf("获取sub配置文件失败")
-	}
-	return nil
+	return fmt.Errorf("获取sub配置文件失败，重试次数耗尽")
 }
 func createSub(data []byte) error {
 	// sub-store 上传默认限制1MB
@@ -147,7 +185,12 @@ func createSub(data []byte) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(fmt.Sprintf("%s/api/subs", BaseURL), "application/json", bytes.NewBuffer(json))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/subs", BaseURL), bytes.NewBuffer(json))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := internalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -182,7 +225,8 @@ func updateSub(data []byte) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	slog.Info("substore更新sub开始", "url", fmt.Sprintf("%s/api/sub/%s", BaseURL, SubName))
+	resp, err := internalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -190,28 +234,63 @@ func updateSub(data []byte) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("更新sub配置文件失败,错误码:%d", resp.StatusCode)
 	}
+	slog.Info("substore更新sub完成", "status", resp.StatusCode)
 	return nil
 }
 
 func checkfile() error {
-	resp, err := http.Get(fmt.Sprintf("%s/api/wholeFile/%s", BaseURL, MihomoName))
-	if err != nil {
-		return err
+	url := fmt.Sprintf("%s/api/wholeFile/%s", BaseURL, MihomoName)
+	for i := 0; i < 2; i++ {
+		resp, err := internalHTTPClient.Get(url)
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			if i == 1 {
+				return fmt.Errorf("获取mihomo配置文件失败，状态码:%d", resp.StatusCode)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if !json.Valid(body) {
+			if i == 1 {
+				return fmt.Errorf("获取mihomo配置文件失败，返回内容不是JSON")
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		var fileResult fileResult
+		err = json.Unmarshal(body, &fileResult)
+		if err != nil {
+			if i == 1 {
+				return err
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if fileResult.Status != "success" {
+			if i == 1 {
+				return fmt.Errorf("获取mihomo配置文件失败")
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		return nil
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	var fileResult fileResult
-	err = json.Unmarshal(body, &fileResult)
-	if err != nil {
-		return err
-	}
-	if fileResult.Status != "success" {
-		return fmt.Errorf("获取mihomo配置文件失败")
-	}
-	return nil
+	return fmt.Errorf("获取mihomo配置文件失败，重试次数耗尽")
 }
 func createfile() error {
 	file := file{
@@ -236,7 +315,12 @@ func createfile() error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(fmt.Sprintf("%s/api/files", BaseURL), "application/json", bytes.NewBuffer(json))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/files", BaseURL), bytes.NewBuffer(json))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := internalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -277,7 +361,8 @@ func updatefile() error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	slog.Info("substore更新mihomo开始", "url", fmt.Sprintf("%s/api/file/%s", BaseURL, MihomoName))
+	resp, err := internalHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -285,6 +370,7 @@ func updatefile() error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("更新mihomo配置文件失败,错误码:%d", resp.StatusCode)
 	}
+	slog.Info("substore更新mihomo完成", "status", resp.StatusCode)
 	return nil
 }
 

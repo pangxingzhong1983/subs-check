@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/beck-8/subs-check/check"
 	"github.com/beck-8/subs-check/config"
@@ -25,6 +26,10 @@ type ConfigSaver struct {
 	results    []check.Result
 	categories []ProxyCategory
 	saveMethod func([]byte, string) error
+}
+
+var internalHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
 }
 
 // NewConfigSaver 创建新的配置保存器
@@ -79,17 +84,20 @@ func SaveConfig(results []check.Result) {
 
 // Save 执行保存操作
 func (cs *ConfigSaver) Save() error {
+	slog.Info("保存流程开始", "results", len(cs.results), "categories", len(cs.categories))
 	// 分类处理代理
 	cs.categorizeProxies()
 
 	// 保存各个类别的代理
 	for _, category := range cs.categories {
+		slog.Info("开始保存分类", "file", category.Name, "count", len(category.Proxies))
 		if err := cs.saveCategory(category); err != nil {
 			slog.Error(fmt.Sprintf("保存到%s失败: %v", config.GlobalConfig.SaveMethod, err))
 			continue
 		}
 	}
 
+	slog.Info("保存流程结束", "saveMethod", config.GlobalConfig.SaveMethod)
 	return nil
 }
 
@@ -128,7 +136,7 @@ func (cs *ConfigSaver) saveCategory(category ProxyCategory) error {
 		return nil
 	}
 	if category.Name == "mihomo.yaml" && config.GlobalConfig.SubStorePort != "" {
-		resp, err := http.Get(fmt.Sprintf("%s/api/file/%s", utils.BaseURL, utils.MihomoName))
+		resp, err := internalHTTPClient.Get(fmt.Sprintf("%s/api/file/%s", utils.BaseURL, utils.MihomoName))
 		if err != nil {
 			return fmt.Errorf("获取mihomo file请求失败: %w", err)
 		}
@@ -147,7 +155,7 @@ func (cs *ConfigSaver) saveCategory(category ProxyCategory) error {
 	}
 	if category.Name == "base64.txt" && config.GlobalConfig.SubStorePort != "" {
 		// http://127.0.0.1:8299/download/sub?target=V2Ray
-		resp, err := http.Get(fmt.Sprintf("%s/download/%s?target=V2Ray", utils.BaseURL, utils.SubName))
+		resp, err := internalHTTPClient.Get(fmt.Sprintf("%s/download/%s?target=V2Ray", utils.BaseURL, utils.SubName))
 		if err != nil {
 			return fmt.Errorf("获取base64.txt请求失败: %w", err)
 		}

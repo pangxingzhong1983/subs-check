@@ -1,6 +1,8 @@
 package platform
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,10 +41,19 @@ func (r *networkLimitedReader) Read(p []byte) (n int, err error) {
 	return r.reader.Read(p)
 }
 
-func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
+func CheckSpeed(ctx context.Context, httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter *uint64) (int, int64, error) {
 	// 注意：速度限制在网络层（statsConn）实现，大小限制在应用层基于网络字节计数器实现
 	// - 速度限制：通过 bucket 在 statsConn 中实现（网络层）
 	// - 大小限制：通过 networkLimitedReader 基于网络字节计数器实现（应用层，但限制网络流量）
+
+	// 单独为测速设置硬性超时时间，确保超时快速返回
+	speedCtx := ctx
+	if config.GlobalConfig.DownloadTimeout > 0 {
+		timeout := time.Duration(config.GlobalConfig.DownloadTimeout) * time.Second
+		var cancel context.CancelFunc
+		speedCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	// 创建一个新的测速专用客户端，基于原有客户端的传输层
 	speedClient := &http.Client{
@@ -57,6 +68,7 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter 
 		return 0, 0, err
 	}
 	req.Header.Set("User-Agent", convert.RandUserAgent())
+	req = req.WithContext(speedCtx)
 
 	// 记录测速前的网络传输字节数
 	var startBytes uint64
@@ -67,6 +79,9 @@ func CheckSpeed(httpClient *http.Client, bucket *ratelimit.Bucket, bytesCounter 
 
 	resp, err := speedClient.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			slog.Debug("测速超时/取消，快速返回", "url", config.GlobalConfig.SpeedTestUrl)
+		}
 		slog.Debug(fmt.Sprintf("测速请求失败: %v", err))
 		return 0, 0, err
 	}
