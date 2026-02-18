@@ -39,7 +39,19 @@ func GetProxies() ([]map[string]any, error) {
 	var mihomoProxies []map[string]any
 	done := make(chan struct{})
 	go func() {
+		// 先去重再入切片，避免在订阅量/节点量极大时把内存打爆。
+		// 注意：这里的 key 需要与 DeduplicateProxies 保持一致，避免行为差异。
+		seenKeys := make(map[string]struct{}, 1024)
+
 		for proxy := range proxyChan {
+			key := dedupKey(proxy)
+			if key == "" {
+				continue
+			}
+			if _, ok := seenKeys[key]; ok {
+				continue
+			}
+			seenKeys[key] = struct{}{}
 			mihomoProxies = append(mihomoProxies, proxy)
 		}
 		done <- struct{}{}
